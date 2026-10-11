@@ -21,8 +21,8 @@ OpenCode v2 features a first-class Integration subsystem (`ctx.integration`) and
     "opencode-models-discovery@latest"
   ],
   "providers": {
-    "deepseek": {
-      "name": "DeepSeek",
+    "deepseek-custom": {
+      "name": "DeepSeek Custom",
       "package": "@opencode-ai/ai/providers/openai-compatible",
       "settings": {
         "baseURL": "https://api.deepseek.com",
@@ -41,7 +41,7 @@ Notice that `settings.apiKey` is completely omitted.
 ### Usage Workflow
 
 1. Run `/connect` in the OpenCode v2 TUI.
-2. Select your provider (`DeepSeek` / `deepseek`).
+2. Select your provider (`DeepSeek Custom` / `deepseek-custom`).
 3. Enter your API key.
 4. Model discovery triggers immediately, populating available models in your session without requiring a restart.
 5. Selecting a discovered model and sending a prompt authenticates successfully.

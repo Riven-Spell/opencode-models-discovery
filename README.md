@@ -19,34 +19,27 @@ Originally inspired by [opencode-lmstudio](https://github.com/agustif/opencode-l
 - Supports provider-level enablement, endpoint overrides, and model filters
 - Supports regex-based model id filtering and raw provider field equality filtering
 - Can enrich model limits and reasoning metadata from provider-specific endpoints
-- Supports OpenCode v1 and v2 `/connect` credentials for custom providers
+- Supports OpenCode v1 and v2 `/connect` credentials for custom providers without requiring API keys in configuration
 - Optionally caches discovered provider models in plugin-owned XDG data files on OpenCode v1 or host-provided storage on OpenCode v2
 
 **OpenCode v2 support (beta):** The same package also contains an OpenCode v2 adapter. Support for OpenCode v2 is currently in beta, and its configuration schema differs from OpenCode v1; see [OpenCode v2 configuration](#opencode-v2-configuration-beta-support) before copying an example below. V2 supports native `/connect` credentials via OpenCode v2 integration APIs, host-provided storage caching via `ctx.storage`, real-time event updates, and native agent tools.
-
-## Installation
-
-```bash
-npm install opencode-models-discovery
-# or
-bun add opencode-models-discovery
-```
 
 ## OpenCode v2 configuration (beta support)
 
 OpenCode v2 uses **`plugins`** (an array of package names) and **`providers`** (a map). Configure discovery under `providers.<id>.settings.modelsDiscovery`; it runs only when `enabled` is explicitly `true`. OpenCode v1 instead uses `plugin`, `provider`, and `options` (see [OpenCode v1 quick start](#opencode-v1-quick-start)).
 
-Install the package from npm, then add a provider to your OpenCode v2 `opencode.json`:
+Add the plugin package to your OpenCode v2 `opencode.json`. OpenCode resolves
+and loads the package automatically:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
-    "opencode-models-discovery@1.9.0"
+    "opencode-models-discovery@1.10.0"
   ],
   "providers": {
-    "gateway": {
-      "name": "My Gateway",
+    "gateway-custom": {
+      "name": "Gateway Custom",
       "package": "@opencode-ai/ai/providers/openai-compatible",
       "settings": {
         "baseURL": "https://gateway.example.com/v1",
@@ -70,7 +63,22 @@ Install the package from npm, then add a provider to your OpenCode v2 `opencode.
 }
 ```
 
-Set `GATEWAY_API_KEY` in the environment used to start OpenCode; the `${GATEWAY_API_KEY}` placeholder is resolved by the OpenCode v2 host. Alternatively, you can omit `apiKey` from `opencode.json` and configure credentials interactively using OpenCode's native `/connect` command (see [Connect and Auth Documentation](docs/connect-and-auth.md)). If your endpoint needs no credential, omit `apiKey`. Use the same provider package shown above for OpenAI-compatible discovery. The provider needs a `baseURL`; the plugin fetches its models from `/v1/models` by default (relative to the URL's **origin**). For providers that expose `/models` instead, set `"endpoint": "/models"` inside `modelsDiscovery`.
+Set `GATEWAY_API_KEY` in the environment used to start OpenCode; the `${GATEWAY_API_KEY}` placeholder is resolved by the OpenCode v2 host. Alternatively, omit `apiKey` from `opencode.json` and configure credentials interactively with OpenCode's native `/connect` command. If your endpoint needs no credential, omit `apiKey`. Use the same provider package shown above for OpenAI-compatible discovery. The provider needs a `baseURL`; the plugin fetches its models from `/v1/models` by default (relative to the URL's **origin**). For providers that expose `/models` instead, set `"endpoint": "/models"` inside `modelsDiscovery`.
+
+### Credentials
+
+OpenCode v2 providers can use API keys managed through the native `/connect`
+workflow. To use this flow, omit `settings.apiKey` from the provider
+configuration, run `/connect`, select the provider, and enter its API key.
+
+The plugin resolves the credential through the host Integration API and uses it
+in memory for model discovery and runtime requests. Resolved keys are not
+written to `opencode.json`, discovery cache records, diagnostics, or logs.
+Credential changes and revocation are picked up through OpenCode v2 Integration
+events without requiring a restart.
+
+See [Connect and Auth Documentation](docs/connect-and-auth.md) for credential
+resolution, lifecycle handling, and security details.
 
 `modelInfoFormat` and `smartModelName` are optional: without them, discovered names remain the model IDs and no external metadata is fetched. Supported metadata formats are `aiproxy`, `models.dev`, `bifrost`, `litellm`, `vllm`, `lmstudio`, `llama-swap`, and `omniroute`. `models.dev` fetches `https://models.dev/models.json` by default; `modelInfoEndpoint` can override the catalog URL. The `aiproxy` format composes that catalog with inline metadata from AIProxy's model list. `filterNonChat` defaults to `true`; it can filter non-chat models when the selected metadata source supplies that information. `timeoutMs` defaults to 5000 ms. Models returned by discovery are added alongside explicitly configured models.
 
