@@ -1,5 +1,5 @@
 import { Plugin } from "@opencode/plugin"
-import { createProviderController, type ConfiguredProvider } from "./catalog.js"
+import { createProviderController, type ConfiguredProvider, type Inventory } from "./catalog.js"
 import { discoverInventory, type CatalogProvider } from "./discovery.js"
 import { parseProviderDiscoveryOptions, type ProviderDiscoveryOptions } from "./provider-config.js"
 import { registerDiscoveryTools, type DiscoveryStatusInput, type DiscoveryStatusProviderReport, formatStatusReport } from "./tools.js"
@@ -8,6 +8,7 @@ import { createV2StorageCache } from "./storage-cache.js"
 import { discoveryCacheKey, isDiscoveryCacheFresh } from "../core/discovery-cache.js"
 import { resolveProviderCredential } from "./credential-resolver.js"
 import { DiscoveryRpcDefinition, type RpcCacheEntry } from "./rpc.js"
+import { applyModelOverride, deleteModelOverride, listModelOverrides, setModelOverride } from "./overrides.js"
 
 export function integrationID(providerID: string): string {
   return providerID
@@ -84,6 +85,7 @@ export async function setupV2(ctx: Plugin.Context): Promise<() => void> {
   const providers: ConfiguredProvider[] = []
   const discovery = new Map<string, ProviderDiscoveryOptions>()
   const controller = createProviderController(ctx, providers, integrationID)
+  let baselineInventory: Inventory = new Map()
   let transformsRegistration: Promise<void> | undefined
 
   const ensureTransformsRegistered = async (): Promise<void> => {
@@ -136,6 +138,15 @@ export async function setupV2(ctx: Plugin.Context): Promise<() => void> {
       ctx.storage ? createV2StorageCache(ctx.storage) : undefined,
       { force }
     )
+    baselineInventory = new Map([...inventory].map(([providerID, models]) => [providerID, new Map(models)]))
+    const storedOverrides = await listModelOverrides(ctx.storage)
+    const overrideByModel = new Map(storedOverrides.map((override) => [`${override.providerID}:${override.modelID}`, override]))
+    for (const [providerID, models] of inventory) {
+      for (const [modelID, model] of models) {
+        const override = overrideByModel.get(`${providerID}:${modelID}`) ?? overrideByModel.get(`${providerID}:${model.modelID}`)
+        if (override) models.set(modelID, applyModelOverride(model as unknown as Record<string, unknown>, override) as unknown as typeof model)
+      }
+    }
     await controller.replaceInventory(inventory)
     return controller.status()
   }
@@ -169,8 +180,8 @@ export async function setupV2(ctx: Plugin.Context): Promise<() => void> {
 
     for (const provider of providers) {
       const providerDiscoveryOptions = discovery.get(provider.id)
-      const modelsMap = inventory.get(provider.id)
-      const models = modelsMap ? [...modelsMap.values()] : []
+        const modelsMap = inventory.get(provider.id)
+        const models = modelsMap ? [...modelsMap.values()] : []
       const cacheConfig = providerDiscoveryOptions?.cache
 
       let storageCacheInfo: DiscoveryStatusProviderReport["storageCache"] | undefined
@@ -227,6 +238,8 @@ export async function setupV2(ctx: Plugin.Context): Promise<() => void> {
         const input = rawInput as DiscoveryStatusInput | undefined
         await syncConfiguredProviders()
         const reports = await collectStatus(input)
+        const overrides = await listModelOverrides(ctx.storage, input?.providerID)
+        const overrideByModel = new Map(overrides.map((override) => [`${override.providerID}:${override.modelID}`, override]))
         return {
           report: formatStatusReport(reports, input),
           providers: reports.map((provider) => ({
@@ -236,6 +249,16 @@ export async function setupV2(ctx: Plugin.Context): Promise<() => void> {
             models: provider.models.map((model) => ({
               id: model.id,
               name: model.name,
+              defaultValues: (() => {
+                const baseline = baselineInventory.get(provider.id)?.get(model.id) ?? baselineInventory.get(provider.id)?.get(model.modelID)
+                return baseline ? {
+                  name: baseline.name,
+                  limit: baseline.limit,
+                  capabilities: baseline.capabilities,
+                  ...(baseline.reasoning !== undefined ? { reasoning: baseline.reasoning } : {}),
+                  ...(baseline.attachment !== undefined ? { attachment: baseline.attachment } : {}),
+                } : undefined
+              })(),
               detail: [
                 `Model: ${model.name}`,
                 "",
@@ -256,7 +279,13 @@ export async function setupV2(ctx: Plugin.Context): Promise<() => void> {
                 `  Input: ${model.capabilities.input.join(", ") || "unknown"}`,
                 `  Output: ${model.capabilities.output.join(", ") || "unknown"}`,
                 `  Variants: ${model.variants?.map((variant) => variant.id).join(", ") || "none"}`,
+                ...(overrideByModel.has(`${provider.id}:${model.id}`) || overrideByModel.has(`${provider.id}:${model.modelID}`)
+                  ? ["", "Override", `  Updated: ${(overrideByModel.get(`${provider.id}:${model.id}`) ?? overrideByModel.get(`${provider.id}:${model.modelID}`))?.updatedAt ?? "unknown"}`, `  Fields: ${Object.keys((overrideByModel.get(`${provider.id}:${model.id}`) ?? overrideByModel.get(`${provider.id}:${model.modelID}`))?.patch ?? {}).join(", ")}`]
+                  : []),
               ].join("\n"),
+              ...((overrideByModel.get(`${provider.id}:${model.id}`) ?? overrideByModel.get(`${provider.id}:${model.modelID}`))
+                ? { override: overrideByModel.get(`${provider.id}:${model.id}`) ?? overrideByModel.get(`${provider.id}:${model.modelID}`) }
+                : {}),
             })),
           })),
         }
@@ -357,14 +386,21 @@ export async function setupV2(ctx: Plugin.Context): Promise<() => void> {
         }
         return { cleared: clearedCount }
       },
-      overrideList: async (_input) => {
-        return { overrides: [] }
+      overrideList: async (rawInput) => {
+        const input = rawInput as { readonly providerID?: string } | undefined
+        return { overrides: await listModelOverrides(ctx.storage, input?.providerID) }
       },
-      overrideSet: async (_input) => {
-        return { success: true }
+      overrideSet: async (rawInput) => {
+        const input = rawInput as { readonly providerID: string; readonly modelID: string; readonly patch: Record<string, unknown>; readonly enabled?: boolean }
+        const override = await setModelOverride(ctx.storage, input)
+        await refreshFromCurrentConfig(true)
+        return { success: true, override }
       },
-      overrideDelete: async (_input) => {
-        return { success: true }
+      overrideDelete: async (rawInput) => {
+        const input = rawInput as { readonly providerID: string; readonly modelID: string }
+        const deleted = await deleteModelOverride(ctx.storage, input.providerID, input.modelID)
+        await refreshFromCurrentConfig(true)
+        return { success: deleted }
       },
     })
   }

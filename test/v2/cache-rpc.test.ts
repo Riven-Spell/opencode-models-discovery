@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import plugin from "../../src/v2/index.js"
 import { discoveryCacheKey } from "../../src/core/discovery-cache.js"
-import { DiscoveryRpcDefinition, type RpcCacheClearOutput, type RpcCacheInspectOutput, type RpcStatusOutput } from "../../src/v2/rpc.js"
+import { DiscoveryRpcDefinition, type RpcCacheClearOutput, type RpcCacheInspectOutput, type RpcStatusOutput, type RpcOverrideListOutput } from "../../src/v2/rpc.js"
 
 describe("V2 Cache Operations RPC", () => {
   function createTestSetup(providersList: Array<Record<string, unknown>> = []) {
@@ -62,6 +62,11 @@ describe("V2 Cache Operations RPC", () => {
         remove: vi.fn().mockImplementation(async (key: string) => {
           storageStore.delete(key)
         }),
+        scan: vi.fn().mockImplementation(async ({ prefix }: { prefix: string }) => ({
+          entries: [...storageStore.entries()]
+            .filter(([key]) => key.startsWith(prefix))
+            .map(([key, value]) => ({ key, value })),
+        })),
       },
       rpc: {
         register: vi.fn().mockImplementation(async (def, handlers) => {
@@ -234,6 +239,53 @@ describe("V2 Cache Operations RPC", () => {
         expect(storageStore.has(cacheKeyA)).toBe(false)
         expect(storageStore.has(cacheKeyB)).toBe(false)
         expect(storageStore.has(overrideKey)).toBe(true)
+      } finally {
+        fetcher.mockRestore()
+      }
+    })
+  })
+
+  describe("model overrides", () => {
+    it("persists, lists, applies, and deletes a model override", async () => {
+      const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [{ id: "model-1" }] }),
+      } as Response)
+      const { ctx, storageStore, rpcHandlers } = createTestSetup([
+        {
+          id: "provider-a",
+          name: "Provider A",
+          package: "@opencode-ai/ai/providers/openai-compatible",
+          settings: {
+            baseURL: "http://127.0.0.1:1234/v1",
+            modelsDiscovery: { enabled: true },
+          },
+        },
+      ])
+
+      try {
+        await plugin.setup(ctx as never)
+        const set = rpcHandlers.overrideSet as (input: unknown) => Promise<{ success: boolean }>
+        const list = rpcHandlers.overrideList as (input?: unknown) => Promise<RpcOverrideListOutput>
+        const status = rpcHandlers.status as (input?: unknown) => Promise<RpcStatusOutput>
+        const remove = rpcHandlers.overrideDelete as (input: unknown) => Promise<{ success: boolean }>
+
+        await expect(set({ providerID: "provider-a", modelID: "model-1", patch: { name: "Custom model", limit: { context: 65536 } } })).resolves.toMatchObject({ success: true })
+        expect(storageStore.has("overrides:provider-a:model-1")).toBe(true)
+
+        const listed = await list({ providerID: "provider-a" })
+        expect(listed.overrides).toHaveLength(1)
+        expect(listed.overrides[0]).toMatchObject({ modelID: "model-1", patch: { name: "Custom model" } })
+
+        const report = await status({ providerID: "provider-a", details: true })
+        expect(report.providers[0]?.models[0]).toMatchObject({
+          name: "Custom model",
+          override: expect.objectContaining({ modelID: "model-1" }),
+        })
+        expect(report.providers[0]?.models[0]?.detail).toContain("Override")
+
+        await expect(remove({ providerID: "provider-a", modelID: "model-1" })).resolves.toEqual({ success: true })
+        expect(storageStore.has("overrides:provider-a:model-1")).toBe(false)
       } finally {
         fetcher.mockRestore()
       }

@@ -1,5 +1,13 @@
 import { Rpc } from "@opencode/schema/rpc"
 
+export interface RpcModelValues {
+  readonly name: string
+  readonly limit: { readonly context: number; readonly output: number; readonly input?: number }
+  readonly capabilities: { readonly tools: boolean; readonly input: string[]; readonly output: string[] }
+  readonly reasoning?: boolean
+  readonly attachment?: boolean
+}
+
 export interface RpcRefreshInput {
   readonly force?: boolean
 }
@@ -21,7 +29,7 @@ export interface RpcStatusOutput {
     readonly id: string
     readonly name: string
     readonly modelCount: number
-    readonly models: readonly { readonly id: string; readonly name: string; readonly detail: string }[]
+    readonly models: readonly { readonly id: string; readonly name: string; readonly detail: string; readonly override?: RpcModelOverride; readonly defaultValues?: RpcModelValues }[]
   }[]
 }
 
@@ -74,6 +82,7 @@ export interface RpcOverrideSetInput {
 
 export interface RpcOverrideSetOutput {
   readonly success: boolean
+  readonly override?: RpcModelOverride
 }
 
 export interface RpcOverrideDeleteInput {
@@ -117,6 +126,8 @@ export const DiscoveryRpcDefinition = Rpc.define({
                       id: { type: "string" },
                       name: { type: "string" },
                       detail: { type: "string" },
+                      override: { type: "object" },
+                      defaultValues: { type: "object" },
                     },
                     required: ["id", "name", "detail"],
                   },
@@ -231,6 +242,17 @@ export const DiscoveryRpcDefinition = Rpc.define({
         type: "object",
         properties: {
           success: { type: "boolean" },
+          override: {
+            type: "object",
+            properties: {
+              providerID: { type: "string" },
+              modelID: { type: "string" },
+              patch: { type: "object" },
+              enabled: { type: "boolean" },
+              updatedAt: { type: "string" },
+            },
+            required: ["providerID", "modelID", "patch", "enabled", "updatedAt"],
+          },
         },
         required: ["success"],
       },
