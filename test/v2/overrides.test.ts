@@ -49,6 +49,11 @@ describe("V2 model overrides", () => {
       modelID: "model-1",
       patch: { unknown: true },
     })).rejects.toThrow("Unsupported override field")
+    await expect(setModelOverride(backend, {
+      providerID: "provider-a",
+      modelID: "model-1",
+      patch: { variants: [{ headers: { authorization: "secret" } }] },
+    })).rejects.toThrow("not allowed")
   })
 
   it("deep-merges an enabled override without changing the API model ID", () => {

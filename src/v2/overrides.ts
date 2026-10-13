@@ -18,14 +18,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
+function assertNoSensitiveFields(value: unknown, path: string): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoSensitiveFields(item, `${path}[${index}]`))
+    return
+  }
+  if (!isRecord(value)) return
+  for (const [field, child] of Object.entries(value)) {
+    if (SENSITIVE_KEYS.test(field)) throw new Error(`Override field is not allowed: ${path}.${field}`)
+    assertNoSensitiveFields(child, `${path}.${field}`)
+  }
+}
+
 function validatePatch(value: unknown, path = "patch"): Record<string, unknown> {
   if (!isRecord(value) || Object.keys(value).length === 0) {
     throw new Error("Override patch must be a non-empty object")
   }
+  assertNoSensitiveFields(value, path)
 
   const allowed = new Set(["name", "limit", "capabilities", "reasoning", "attachment", "cost", "compatibility", "variants"])
   for (const [field, item] of Object.entries(value)) {
-    if (SENSITIVE_KEYS.test(field)) throw new Error(`Override field is not allowed: ${path}.${field}`)
     if (!allowed.has(field)) throw new Error(`Unsupported override field: ${path}.${field}`)
 
     if (["name"].includes(field) && typeof item !== "string") {
@@ -55,11 +67,6 @@ function validatePatch(value: unknown, path = "patch"): Record<string, unknown> 
     }
     if (field === "variants" && !Array.isArray(item)) throw new Error(`${path}.variants must be an array`)
     if (field === "cost" && !Array.isArray(item) && !isRecord(item)) throw new Error(`${path}.cost must be an object or array`)
-    if (field === "compatibility") {
-      for (const nestedKey of Object.keys(item as Record<string, unknown>)) {
-        if (SENSITIVE_KEYS.test(nestedKey)) throw new Error(`Override field is not allowed: ${path}.compatibility.${nestedKey}`)
-      }
-    }
   }
   return structuredClone(value)
 }

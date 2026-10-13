@@ -183,6 +183,34 @@ describe("V2 Cache Operations RPC", () => {
         fetcher.mockRestore()
       }
     })
+
+    it("redacts sensitive fields from raw cache inspection", async () => {
+      const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [] }),
+      } as Response)
+      const { ctx, storageStore, rpcHandlers } = createTestSetup()
+      const cacheKeyA = discoveryCacheKey("opencode.models-discovery.v2", "provider-a")
+      storageStore.set(cacheKeyA, {
+        version: 1,
+        fetchedAt: new Date().toISOString(),
+        identity: { providerID: "provider-a", baseURL: "http://127.0.0.1:1234/v1", endpoint: "/v1/models" },
+        rawModels: [{ id: "m1", apiKey: "raw-secret", nested: { authorization: "Bearer raw-secret" } }],
+        enrichments: { m1: { token: "raw-secret" } },
+      })
+
+      try {
+        await plugin.setup(ctx as never)
+        const status = rpcHandlers.status as (input?: unknown) => Promise<RpcStatusOutput>
+        const result = await status({ providerID: "provider-a", rawCache: true })
+        const serialized = JSON.stringify(result)
+        expect(serialized).not.toContain("raw-secret")
+        expect(serialized).not.toContain("apiKey")
+        expect(serialized).not.toContain("authorization")
+      } finally {
+        fetcher.mockRestore()
+      }
+    })
   })
 
   describe("cacheClear", () => {
@@ -286,6 +314,78 @@ describe("V2 Cache Operations RPC", () => {
 
         await expect(remove({ providerID: "provider-a", modelID: "model-1" })).resolves.toEqual({ success: true })
         expect(storageStore.has("overrides:provider-a:model-1")).toBe(false)
+      } finally {
+        fetcher.mockRestore()
+      }
+    })
+
+    it("restores an override after a second plugin setup using the same storage", async () => {
+      const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: [{ id: "model-1" }] }),
+      } as Response)
+      const first = createTestSetup([
+        {
+          id: "provider-a",
+          name: "Provider A",
+          package: "@opencode-ai/ai/providers/openai-compatible",
+          settings: { baseURL: "http://127.0.0.1:1234/v1", modelsDiscovery: { enabled: true, cache: { enabled: true } } },
+        },
+      ])
+
+      try {
+        const cleanup = await plugin.setup(first.ctx as never)
+        const set = first.rpcHandlers.overrideSet as (input: unknown) => Promise<unknown>
+        await set({ providerID: "provider-a", modelID: "model-1", patch: { name: "Restored name" } })
+        cleanup?.()
+
+        const second = createTestSetup([
+          {
+            id: "provider-a",
+            name: "Provider A",
+            package: "@opencode-ai/ai/providers/openai-compatible",
+            settings: { baseURL: "http://127.0.0.1:1234/v1", modelsDiscovery: { enabled: true, cache: { enabled: true } } },
+          },
+        ])
+        // Reuse the durable storage from the first setup to model a service restart.
+        second.ctx.storage.get.mockImplementation(async (key: string) => first.storageStore.get(key))
+        second.ctx.storage.set.mockImplementation(async (key: string, value: unknown) => { first.storageStore.set(key, value) })
+        second.ctx.storage.remove.mockImplementation(async (key: string) => { first.storageStore.delete(key) })
+        second.ctx.storage.scan.mockImplementation(async ({ prefix }: { prefix: string }) => ({
+          entries: [...first.storageStore.entries()].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ key, value })),
+        }))
+        await plugin.setup(second.ctx as never)
+        const status = second.rpcHandlers.status as (input?: unknown) => Promise<RpcStatusOutput>
+        const result = await status({ providerID: "provider-a", details: true })
+        expect(result.providers[0]?.models[0]?.name).toBe("Restored name")
+      } finally {
+        fetcher.mockRestore()
+      }
+    })
+
+    it("reapplies an override when a temporarily missing model returns", async () => {
+      const fetcher = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: "model-1" }] }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [] }) } as Response)
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: "model-1" }] }) } as Response)
+      const { ctx, rpcHandlers } = createTestSetup([
+        {
+          id: "provider-a",
+          name: "Provider A",
+          package: "@opencode-ai/ai/providers/openai-compatible",
+          settings: { baseURL: "http://127.0.0.1:1234/v1", modelsDiscovery: { enabled: true } },
+        },
+      ])
+
+      try {
+        await plugin.setup(ctx as never)
+        const set = rpcHandlers.overrideSet as (input: unknown) => Promise<unknown>
+        const refresh = rpcHandlers.refresh as (input?: unknown) => Promise<unknown>
+        const status = rpcHandlers.status as (input?: unknown) => Promise<RpcStatusOutput>
+        await set({ providerID: "provider-a", modelID: "model-1", patch: { name: "Persistent name" } })
+        expect((await status({ providerID: "provider-a", details: true })).providers[0]?.models).toEqual([])
+        await refresh({ force: true })
+        expect((await status({ providerID: "provider-a", details: true })).providers[0]?.models[0]?.name).toBe("Persistent name")
       } finally {
         fetcher.mockRestore()
       }

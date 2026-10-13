@@ -5,7 +5,7 @@ import { parseProviderDiscoveryOptions, type ProviderDiscoveryOptions } from "./
 import { registerDiscoveryTools, type DiscoveryStatusInput, type DiscoveryStatusProviderReport, formatStatusReport } from "./tools.js"
 import type { RefreshResult } from "./tools.js"
 import { createV2StorageCache } from "./storage-cache.js"
-import { discoveryCacheKey, isDiscoveryCacheFresh } from "../core/discovery-cache.js"
+import { discoveryCacheKey, isDiscoveryCacheFresh, sanitizeSensitiveFields } from "../core/discovery-cache.js"
 import { resolveProviderCredential } from "./credential-resolver.js"
 import { DiscoveryRpcDefinition, type RpcCacheEntry } from "./rpc.js"
 import { applyModelOverride, deleteModelOverride, listModelOverrides, setModelOverride } from "./overrides.js"
@@ -217,8 +217,8 @@ export async function setupV2(ctx: Plugin.Context): Promise<() => void> {
               fresh,
               fetchedAt,
               rawModelCount: rawModels.length,
-              rawModels: options?.rawCache ? rawModels : undefined,
-              enrichments: options?.rawCache ? enrichments : undefined,
+              rawModels: options?.rawCache ? sanitizeSensitiveFields(rawModels) as readonly Record<string, unknown>[] : undefined,
+              enrichments: options?.rawCache ? sanitizeSensitiveFields(enrichments) as Record<string, unknown> : undefined,
             }
           } else {
             storageCacheInfo = { exists: false, fresh: false }
