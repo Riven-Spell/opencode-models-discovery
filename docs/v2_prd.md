@@ -2,9 +2,9 @@
 
 ## Status
 
-This document records the OpenCode v2 support work. OpenCode v2 support is currently in beta; it is not a promise that every OpenCode v1 behavior has a v2 equivalent.
+This document records the OpenCode v2 support architecture and stable contract for the `2.x` release line. OpenCode v2 is the primary integration; the separate OpenCode v1 adapter remains a legacy compatibility path and does not need an equivalent for every V1 behavior.
 
-The OpenCode v1 implementation remains the compatibility line. The package exports separate v1 and v2 adapters from a combined entrypoint.
+The OpenCode v1 implementation remains the legacy compatibility line. The package exports separate V1 and V2 adapters from a combined entrypoint.
 
 ## Background
 
@@ -25,7 +25,7 @@ OpenCode v2 can translate some existing v1-shaped `opencode.json(c)` files in me
 - Keep all provider transform callbacks pure and replay-safe.
 - Establish automated unit and OpenCode v2 integration coverage before publication.
 
-## Initial v2 Scope
+## V2 Scope and compatibility boundary
 
 - Reusing the V1 `config` hook or mutating raw OpenCode configuration.
 - Reading v1 OpenCode or Mimocode `auth.json` files directly.
@@ -33,9 +33,9 @@ OpenCode v2 can translate some existing v1-shaped `opencode.json(c)` files in me
 - V1 legacy global configuration detection, migration toast, or `/models-discovery:migrate`.
 - Dynamic slash-command creation was initially out of scope; the V2 adapter now registers `/models-discovery-refresh` through the Command transform API.
 - Automatically writing command templates or configuration into a project or global OpenCode directory.
-- Publishing OpenCode v2 support as stable before beta validation is complete.
+- Treating the V1 adapter as the implementation source for V2 lifecycle behavior.
 
-The v2 beta does not port the OpenCode v1 persisted discovery state or its per-model override format. V2 instead supports an opt-in provider-scoped cache backed by the host-provided storage API. It stores raw discovery responses and enrichment results, reuses fresh entries across discovery runs, and exposes them through `models_discovery_status` when `rawCache: true` is requested. A service restart can reuse this host-managed cache when it is enabled; cache-associated per-model overrides remain outside the initial V2 scope.
+V2 does not port the OpenCode v1 persisted discovery state or its V1 override format. V2 supports an opt-in provider-scoped cache backed by the host-provided storage API and stores model overrides separately under `overrides:<providerID>:<modelID>`. It stores raw discovery responses and enrichment results, reuses fresh entries across discovery runs, and exposes them through `models_discovery_status` when `rawCache: true` is requested. A service restart can reuse this host-managed cache when V2 caching is enabled.
 
 ## Relevant V2 Contract
 
@@ -224,7 +224,7 @@ V1-shaped `provider.<id>.options.modelsDiscovery` and `plugins[].options.provide
 
 Discovery authentication uses public v2 interfaces.
 
-Current beta priority:
+Current stable priority:
 
 1. `providers.<id>.settings.apiKey`, including an environment substitution resolved by OpenCode.
 2. A public v2 integration/provider resolution capability when it provides a usable API key.
@@ -245,7 +245,7 @@ Tool results can return model-visible `content` and therefore provide informatio
 
 ### Phase 0: Catalog And Auth Spike (completed)
 
-Purpose: validate the beta APIs that determine feasibility before porting V1 functionality.
+Purpose: record the public APIs and compatibility decisions that support the stable V2 adapter.
 
 Implement a minimal local V2 plugin that:
 
@@ -265,7 +265,7 @@ Exit criteria:
 - Reload replays the registered transform with current in-memory state.
 - The exact provider and model draft TypeScript shapes are captured in code and tests.
 - The team confirms that top-level provider `settings.modelsDiscovery` is the v2 discovery configuration boundary.
-- `/connect` support has either a verified public implementation path or an explicit initial-beta exclusion.
+- `/connect` support uses the verified public Integration API path.
 
 ### Phase 1: Core v2 Discovery (completed)
 
@@ -290,7 +290,7 @@ Exit criteria:
 - Explicit user model overrides are retained.
 - Failed discovery does not break OpenCode startup or remove explicit models.
 
-### Phase 2: Metadata Enrichment (completed in beta scope)
+### Phase 2: Metadata Enrichment (completed)
 
 Port and adapt:
 
@@ -310,7 +310,7 @@ Exit criteria:
 - Discovery failures remain non-fatal and do not remove explicit models.
 - Metadata mapping remains credential-free and leaves unknown fields unset.
 
-### Phase 3: Documentation, Packaging, And Beta Release (in progress)
+### Phase 3: Documentation, Packaging, And Stable Release (completed)
 
 Implement:
 
@@ -322,7 +322,7 @@ Implement:
 
 Release guidance:
 
-- Release OpenCode v2 support as beta within the combined `opencode-models-discovery` package.
+- Release OpenCode v2 as the primary stable integration within the combined `opencode-models-discovery` package.
 - Keep the OpenCode v1 adapter and configuration contract working.
 - Pin or narrowly constrain the validated `@opencode/plugin` version.
 - Verify the compiled package entrypoints with the package-loadability tests; host-runtime checks are maintained separately from the regular unit test command.
@@ -336,10 +336,10 @@ V2 provider-scoped caching is implemented separately from the V1 disk-cache form
 - fresh entries are reprocessed through the shared discovery pipeline;
 - `models_discovery_status` can expose cached data with `rawCache: true`.
 
-The following V1-specific capabilities remain unsupported in V2:
+The following V1-specific capabilities remain intentionally separate from V2:
 
 - importing or sharing the V1 XDG disk-cache format;
-- cache-associated per-model overrides;
+- the V1 disk-cache-associated override format;
 - `/models-discovery:config` management of cached inventory and overrides.
 
 V1/V2 cache migration is not planned unless a future offline-startup or cross-host migration requirement justifies a separate design.
@@ -386,15 +386,15 @@ Manual checks:
 | Item | Risk | Required resolution |
 | --- | --- | --- |
 | Catalog model creation | Provider editor behavior can change with the v2 API. | Keep the V2 mock-context catalog tests and repeat a host-runtime probe manually when upgrading the pinned host packages. |
-| Catalog draft/provider shapes | Beta types and draft shape can change. | Compile against a pinned plugin version and record it. |
+| Catalog draft/provider shapes | Pinned public types can change between host releases. | Compile against a pinned plugin version and record it. |
 | Explicit model precedence | Transform ordering may affect whether user details win. | Verify with catalog integration tests; adjust composition approach based on observed public contract. |
 | Discovery config placement | `modelsDiscovery` is stored in top-level provider settings and read through the V2 provider registry. | Keep provider identity, connection settings, credentials, explicit models, and discovery controls in one provider declaration. |
 | `/connect` credentials | V2 storage is service-owned and v1 file fallbacks are invalid. | Use only credentials exposed through the public v2 integration API. |
 | Dynamic commands/toasts | Public V2 APIs do not expose V1 equivalents. | Use tools and logs; distribute optional command templates separately only if needed. |
-| OpenCode v2 beta churn | The v2 API may change before stable release. | Isolate source, pin versions, and run integration tests on upgrade. |
+| OpenCode v2 host API changes | The host API may change between releases. | Isolate source, pin versions, and run integration tests on upgrade. |
 | Package compatibility | V1 and V2 plugin APIs are different, although recent V1 hosts support a combined default export. | Keep separate adapters, require V1 >= 1.18.29 for the combined form, verify package entrypoints, and perform host-runtime checks when upgrading pinned host packages. |
 
-## Definition Of Done For Initial V2 Beta
+## Definition Of Done For Stable V2
 
 - The OpenCode v2 plugin uses only documented/public v2 plugin APIs.
 - A configured OpenAI-compatible provider can dynamically expose at least one previously unconfigured model in the V2 catalog.
@@ -404,5 +404,5 @@ Manual checks:
 - Refresh, filters, provider isolation, reasoning variants, and the selected enrichment formats have automated coverage.
 - The package is installable and verified outside the repository worktree.
 - Documentation states the exact V2 config shape, version compatibility, known auth limits, and unsupported V1-only features.
-- Documentation explains that V2 uses a separate host-managed cache, while cache-associated per-model overrides remain deferred.
+- Documentation explains that V2 uses separate host-managed cache and override namespaces, while V1 storage remains isolated.
 - V1 `dev`/`main` behavior and release path remain unchanged until an explicit major-version release decision.

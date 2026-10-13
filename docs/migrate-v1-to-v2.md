@@ -2,14 +2,14 @@
 
 This guide explains how to migrate `opencode-models-discovery` configuration between the OpenCode v1 and OpenCode v2 host formats.
 
-OpenCode v2 support is currently in beta. The package contains separate adapters for the two host generations, so changing the configuration shape is required when moving a project from one host to the other.
+OpenCode v2 is the stable, primary integration. The package contains separate adapters for the two host generations, so changing the configuration shape is required when moving a project from one host to the other. Existing OpenCode v1 users may remain on the legacy adapter while planning migration.
 
 ## Configuration shape mapping
 
 | OpenCode v1 | OpenCode v2 |
 |---|---|
 | `plugin` | `plugins` |
-| `plugin: ["opencode-models-discovery"]` | `plugins: ["opencode-models-discovery@1.6.1"]` |
+| `plugin: ["opencode-models-discovery"]` | `plugins: ["opencode-models-discovery@2.0.0"]` |
 | `provider` | `providers` |
 | `provider.<id>.npm` | `providers.<id>.package` |
 | `provider.<id>.options` | `providers.<id>.settings` |
@@ -64,7 +64,7 @@ The V1 package commonly uses:
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
-    "opencode-models-discovery@1.6.1"
+    "opencode-models-discovery@2.0.0"
   ],
   "providers": {
     "gateway": {
@@ -100,7 +100,7 @@ The V1 package commonly uses:
 8. Check the discovery endpoint. V2 defaults to `/v1/models`; use `"endpoint": "/models"` for providers such as DeepSeek that expose a different path.
 9. Restart OpenCode v2. If using the background service, run `opencode service restart` after changing a local plugin build or its configuration.
 
-V2 caching is optional and independent from the V1 disk cache. If desired, add the following under the V2 provider's `settings.modelsDiscovery`:
+V2 caching is optional and independent from the V1 disk cache. V2 model overrides are also independent and use the `overrides:<providerID>:<modelID>` host-storage namespace. If desired, add the following under the V2 provider's `settings.modelsDiscovery`:
 
 ```json
 "cache": {
@@ -109,20 +109,20 @@ V2 caching is optional and independent from the V1 disk cache. If desired, add t
 }
 ```
 
-This stores raw discovery models and enrichment results through the host-provided storage API. V1 cache files are not imported, and V2 cache-associated model overrides are not currently supported.
+This stores raw discovery models and enrichment results through the host-provided storage API. V1 cache files are not imported. Use `/models-discovery-console` to inspect models and edit supported V2 overrides without changing provider configuration.
 
 ## Options that do not migrate directly
 
 The following V1 behavior does not migrate directly to the OpenCode v2 adapter:
 
 - V1 `modelsDiscovery.cache` persisted disk discovery state and its XDG file format
-- cache-associated per-model overrides
+- V1 cache-associated per-model override files and `/models-discovery:config` management
 - `/models-discovery:config` management of cached inventory and overrides
 - V1 `auth.json` and `OPENCODE_AUTH_CONTENT` credential fallback
 - `/models-discovery:migrate`
 - V1 startup config-hook behavior
 
-OpenCode v2 uses its provider registry and keeps discovered models in the background service's inventory. When enabled, V2 also persists raw discovery responses and enrichment results through the host-provided storage API, separately from the V1 disk-cache format. V2 caching is disabled by default and can be inspected with `models_discovery_status` and `rawCache: true`. The v2 agent tools `models_discovery_refresh` and `models_discovery_status` are available to the agent, and `/models-discovery-refresh` is available as a direct TUI command.
+OpenCode v2 uses its provider registry and keeps discovered models in the background service's inventory. When enabled, V2 also persists raw discovery responses and enrichment results through the host-provided storage API, separately from the V1 disk-cache format. V2 caching is disabled by default and can be inspected with `models_discovery_status` and `rawCache: true`. The V2 agent tools `models_discovery_refresh` and `models_discovery_status` are available to the agent, and `/models-discovery-refresh` and `/models-discovery-console` are available as direct TUI commands. V1 remains a supported legacy compatibility path with separate cache and credential behavior.
 
 ## Credentials
 
