@@ -1,5 +1,27 @@
 # Upgrading
 
+## Upgrading to v2.0.0
+
+Version `2.0.0` makes OpenCode v2 the stable, primary integration while
+retaining the OpenCode v1 adapter as legacy compatibility support. Existing V1
+configurations continue to use the V1 adapter; migrate to the V2 `plugins` /
+`providers` shape when adopting OpenCode v2.
+
+V2 discovery settings live under:
+
+```text
+providers.<name>.settings.modelsDiscovery
+```
+
+V2 uses host-managed `ctx.storage` for discovery cache and stores model
+overrides separately under:
+
+```text
+overrides:<providerID>:<modelID>
+```
+
+V1 XDG cache files, V1 auth fallback, and V2 host storage are not shared.
+
 ## v1.0 Provider-Level Boundary
 
 Version `1.0.0` completes the provider-level configuration migration started in `0.12.0`.

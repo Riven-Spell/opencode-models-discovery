@@ -141,6 +141,13 @@ describe('ModelDiscovery Plugin', () => {
       expect(hooks.config).toBeTypeOf('function')
       expect(hooks.event).toBeTypeOf('function')
       expect(hooks['chat.params']).toBeUndefined()
+      expect(mockClient.app.log).toHaveBeenCalledWith(expect.objectContaining({
+        body: expect.objectContaining({
+          level: 'info',
+          message: 'Running through the OpenCode v1 legacy adapter; OpenCode v2 is the primary supported integration.',
+          extra: { category: 'plugin', adapter: 'v1-legacy', supportPolicy: 'legacy' },
+        }),
+      }))
     })
 
     it('should handle invalid client gracefully', async () => {

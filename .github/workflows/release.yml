@@ -3,15 +3,10 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version_type:
-        description: 'Version bump type'
+      version:
+        description: 'Release version, for example 2.0.0-rc.1 or 2.0.0'
         required: true
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-        default: patch
+        type: string
       source_branch:
         description: 'Source branch to release from'
         required: true
@@ -55,6 +50,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Run release script
-        run: bun scripts/release.ts prepare ${{ inputs.version_type }}
+        run: bun scripts/release.ts prepare "${{ inputs.version }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
