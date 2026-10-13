@@ -123,7 +123,7 @@ describe("V2 TUI Plugin", () => {
 
   it("browses providers, models and details then returns to each list", async () => {
     const { ctx, status, dialogSelect, dialogAlert, getKeymapLayer } = createMockTuiContext()
-    dialogSelect.mockResolvedValueOnce("browse").mockResolvedValueOnce("hyy").mockResolvedValueOnce(0).mockResolvedValueOnce(-1)
+    dialogSelect.mockResolvedValueOnce("browse").mockResolvedValueOnce("hyy").mockResolvedValueOnce(0).mockResolvedValueOnce("details").mockResolvedValueOnce(-1).mockResolvedValueOnce(undefined)
     await tuiPlugin.setup(ctx as never)
 
     const commands = getKeymapLayer()?.commands as Array<{
@@ -148,8 +148,8 @@ describe("V2 TUI Plugin", () => {
     expect(dialogSelect).toHaveBeenNthCalledWith(3, expect.objectContaining({
       options: [{ title: "← Back to providers", value: -1 }, { title: "model-a | Model A", value: 0 }],
     }))
-    expect(dialogSelect.mock.calls[3][0]).toEqual(dialogSelect.mock.calls[2][0])
-    expect(dialogSelect.mock.calls[4][0]).toEqual(dialogSelect.mock.calls[1][0])
+    expect(dialogSelect.mock.calls[4][0]).toEqual(dialogSelect.mock.calls[2][0])
+    expect(dialogSelect.mock.calls[5][0]).toEqual(dialogSelect.mock.calls[1][0])
   })
 
   it("passes an optional provider filter to the status RPC", async () => {

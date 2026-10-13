@@ -3,6 +3,7 @@ import {
   DiscoveryRpcDefinition,
   type RpcCacheClearOutput,
   type RpcCacheInspectOutput,
+  type RpcModelOverride,
   type RpcRefreshOutput,
   type RpcStatusOutput,
 } from "./v2/rpc.js"
@@ -24,6 +25,132 @@ function formatError(error: unknown): string {
     : typeof error === "object" && error !== null
       ? (error as { message?: string }).message ?? JSON.stringify(error)
       : String(error)
+}
+
+type OverrideEditContext = {
+  readonly location?: unknown
+  readonly ui: {
+    readonly dialog: {
+      select<Value>(options: { title: string; placeholder?: string; current?: Value; options: readonly { title: string; value: Value; description?: string }[] }): Promise<Value | undefined>
+      prompt(options: { title: string; description?: string; placeholder?: string; value?: string }): Promise<string | undefined>
+      alert(options: { title: string; message: string }): Promise<void>
+    }
+    readonly toast: { show(options: { title: string; message: string; variant?: "info" | "success" | "warning" | "error" }): void }
+  }
+  readonly client: { rpc(definition: unknown): unknown }
+}
+
+type OverrideModelValues = {
+  readonly name: string
+  readonly limit: { readonly context: number; readonly output: number; readonly input?: number }
+  readonly capabilities: { readonly tools: boolean; readonly input: string[]; readonly output: string[] }
+  readonly reasoning?: boolean
+  readonly attachment?: boolean
+}
+
+async function editModelOverride(
+  context: OverrideEditContext,
+  providerID: string,
+  modelID: string,
+  existing?: RpcModelOverride,
+  defaults?: OverrideModelValues,
+): Promise<void> {
+  const current = existing?.patch
+  const hasOverride = (field: string): boolean => {
+    if (field.startsWith("limit.")) {
+      const key = field.slice("limit.".length)
+      return Object.prototype.hasOwnProperty.call(current?.limit ?? {}, key)
+    }
+    if (field.startsWith("capabilities.")) {
+      const key = field.slice("capabilities.".length)
+      return Object.prototype.hasOwnProperty.call(current?.capabilities ?? {}, key)
+    }
+    return Object.prototype.hasOwnProperty.call(current ?? {}, field)
+  }
+
+  const valueFor = (field: string): unknown => {
+    if (field === "limit.context" || field === "limit.output" || field === "limit.input") {
+      const key = field.slice("limit.".length) as "context" | "output" | "input"
+      return (current?.limit as Record<string, unknown> | undefined)?.[key] ?? defaults?.limit[key]
+    }
+    if (field === "capabilities.tools") return (current?.capabilities as Record<string, unknown> | undefined)?.tools ?? defaults?.capabilities.tools
+    return current?.[field] ?? defaults?.[field as "name" | "reasoning" | "attachment"]
+  }
+
+  const displayValue = (field: string): string => {
+    const value = valueFor(field)
+    if (value === undefined) return "unknown"
+    if (typeof value === "boolean") return value ? "on" : "off"
+    return String(value)
+  }
+
+  const fieldTitle = (title: string, field: string): string => {
+    return `${title}${hasOverride(field) ? " *" : ""} · ${displayValue(field)}`
+  }
+
+  const field = await context.ui.dialog.select({
+    title: "Edit model override",
+    placeholder: "Choose a field",
+    options: [
+      { title: fieldTitle("Display name", "name"), value: "name" },
+      { title: fieldTitle("Context limit", "limit.context"), value: "limit.context" },
+      { title: fieldTitle("Output limit", "limit.output"), value: "limit.output" },
+      { title: fieldTitle("Input limit", "limit.input"), value: "limit.input" },
+      { title: fieldTitle("Reasoning support", "reasoning"), value: "reasoning" },
+      { title: fieldTitle("Tool support", "capabilities.tools"), value: "capabilities.tools" },
+      { title: fieldTitle("Attachment support", "attachment"), value: "attachment" },
+    ],
+  })
+  if (!field) return
+
+  const currentValue = valueFor(field)
+
+  let raw: string | undefined
+  if (field === "reasoning" || field === "attachment" || field === "capabilities.tools") {
+    const value = await context.ui.dialog.select({
+      title: `Set ${field}`,
+      current: currentValue as boolean | undefined,
+      options: [
+        { title: "Enabled", value: true },
+        { title: "Disabled", value: false },
+      ],
+    })
+    if (value === undefined) return
+    raw = String(value as boolean)
+  } else {
+    raw = await context.ui.dialog.prompt({
+      title: `Set ${field}`,
+      value: currentValue === undefined ? undefined : String(currentValue),
+      placeholder: field === "name" ? "Model display name" : "Positive number",
+    })
+    if (raw === undefined) return
+  }
+
+  let value: unknown = raw
+  if (field === "reasoning" || field === "attachment" || field === "capabilities.tools") value = raw === "true"
+  if (field.startsWith("limit.")) {
+    const numericValue = Number(raw)
+    value = numericValue
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      await context.ui.dialog.alert({ title: "Invalid override", message: "Limit must be a positive number." })
+      return
+    }
+  }
+
+  const patch: Record<string, unknown> = existing?.patch ? structuredClone(existing.patch) : {}
+  if (field.startsWith("limit.")) {
+    patch.limit = { ...(patch.limit as Record<string, unknown> | undefined), [field.slice("limit.".length)]: value }
+  } else if (field.startsWith("capabilities.")) {
+    patch.capabilities = { ...(patch.capabilities as Record<string, unknown> | undefined), [field.slice("capabilities.".length)]: value }
+  } else {
+    patch[field] = value
+  }
+
+  const rpc = context.client.rpc(DiscoveryRpcDefinition) as unknown as {
+    overrideSet(input: unknown, options: unknown): Promise<{ success: boolean }>
+  }
+  await rpc.overrideSet({ providerID, modelID, patch, enabled: true }, { location: context.location })
+  context.ui.toast.show({ title: "Models Discovery", message: "Override saved and provider reloaded.", variant: "success" })
 }
 
 export default defineTuiPlugin({
@@ -77,7 +204,7 @@ export default defineTuiPlugin({
                   return
                 }
               }
-              const result = (await rpc.status(
+              let result = (await rpc.status(
                 { details: true, ...(providerID ? { providerID } : {}) },
                 { location },
               )) as RpcStatusOutput
@@ -88,6 +215,11 @@ export default defineTuiPlugin({
                 })
                 return
               }
+              const reloadStatus = async (): Promise<RpcStatusOutput> => (await rpc.status(
+                { details: true, ...(providerID ? { providerID } : {}) },
+                { location },
+              )) as RpcStatusOutput
+
               while (true) {
                 const selected = await context.ui.dialog.select({
                   title: "Models Discovery: Providers",
@@ -98,20 +230,20 @@ export default defineTuiPlugin({
                   })),
                 })
                 if (selected === undefined) return
-                const provider = result.providers.find((entry) => entry.id === selected)
+                let provider = result.providers.find((entry) => entry.id === selected)
                 if (!provider) return
                 if (provider.models.length === 0) {
                   await context.ui.dialog.alert({ title: provider.name, message: "No discovered models for this provider." })
                   continue
                 }
-                while (true) {
-                  const modelIndex = await context.ui.dialog.select({
-                    title: `${provider.id} | ${provider.name}: Models`,
-                    placeholder: "Select a model to inspect",
+                  while (true) {
+                    const modelIndex = await context.ui.dialog.select({
+                    title: `${provider.id} | ${provider.name}: Models (* = overridden)`,
+                    placeholder: "Select a model to inspect (* = overridden)",
                     options: [
                       { title: "← Back to providers", value: -1 },
                       ...provider.models.map((model, index) => ({
-                        title: `${model.id} | ${model.name}`,
+                        title: `${model.id}${model.override ? " *" : ""} | ${model.name}`,
                         value: index,
                       })),
                     ],
@@ -120,10 +252,45 @@ export default defineTuiPlugin({
                   if (modelIndex === -1) break
                   const model = provider.models[modelIndex]
                   if (!model) return
-                  await context.ui.dialog.alert({
+                  const action = await context.ui.dialog.select({
                     title: `${provider.id} / ${model.id}`,
-                    message: model.detail,
+                    placeholder: "Choose a model operation",
+                    options: [
+                      { title: "View details", value: "details", description: "Show resolved model metadata" },
+                      { title: "Edit override", value: "edit", description: "Change supported model metadata" },
+                      ...(model.override ? [{ title: "Delete override", value: "delete", description: "Restore discovered metadata" }] : []),
+                      { title: "← Back to models", value: "back" },
+                    ],
                   })
+                  if (action === undefined || action === "details" || action === (-1 as unknown as string)) {
+                    await context.ui.dialog.alert({
+                      title: `${provider.id} / ${model.id}`,
+                      message: model.detail,
+                    })
+                  } else if (action === "edit") {
+                    await editModelOverride({ ...context, location }, provider.id, model.id, model.override, model.defaultValues)
+                    result = await reloadStatus()
+                    provider = result.providers.find((entry) => entry.id === selected)
+                    if (!provider) return
+                    continue
+                  } else if (action === "delete" && model.override) {
+                    const confirmed = await context.ui.dialog.confirm({
+                      title: "Delete model override?",
+                      message: `Remove the override for ${provider.id}/${model.id}?`,
+                      label: { confirm: "Delete", cancel: "Cancel" },
+                    })
+                    if (confirmed) {
+                      await (rpc as unknown as { overrideDelete(input: unknown, options: unknown): Promise<{ success: boolean }> }).overrideDelete(
+                        { providerID: provider.id, modelID: model.id },
+                        { location },
+                      )
+                      context.ui.toast.show({ title: "Models Discovery", message: "Override deleted.", variant: "success" })
+                      result = await reloadStatus()
+                      provider = result.providers.find((entry) => entry.id === selected)
+                      if (!provider) return
+                      continue
+                    }
+                  }
                 }
               }
             } catch (error) {

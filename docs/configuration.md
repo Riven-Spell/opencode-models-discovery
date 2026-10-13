@@ -2,11 +2,11 @@
 
 This plugin discovers models for OpenAI-compatible providers and merges them into the active OpenCode config at startup.
 
-The package supports both OpenCode v1 and OpenCode v2. Their provider configuration shapes are different. The OpenCode v2 adapter is currently in beta.
+The package supports both OpenCode v1 and OpenCode v2 through separate host adapters. OpenCode v2 is the stable, primary integration; OpenCode v1 remains a legacy compatibility adapter.
 
 For a step-by-step conversion between the two configuration formats, see [Migrating Configuration from OpenCode v1 to OpenCode v2](migrate-v1-to-v2.md).
 
-## OpenCode v2 configuration (beta support)
+## OpenCode v2 configuration (stable support)
 
 OpenCode v2 uses `plugins` and `providers`. The plugin can be declared directly as a package name in `plugins`. Discovery configuration is read from `providers.<id>.settings.modelsDiscovery`; it is not read from `provider.<id>.options.modelsDiscovery` or `plugins[].options.providers`.
 
@@ -14,7 +14,7 @@ OpenCode v2 uses `plugins` and `providers`. The plugin can be declared directly 
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
-    "opencode-models-discovery@1.6.1"
+    "opencode-models-discovery@2.0.0"
   ],
   "providers": {
     "lmstudio": {
@@ -53,13 +53,17 @@ OpenCode v2 providers do not require a hardcoded `apiKey` in `opencode.json`. Yo
 
 Optionally, you can set `providers.<id>.settings.integrationID` if you want a provider to reuse credentials from a differently named integration. See [Connect and Auth Documentation](connect-and-auth.md) for full details.
 
-The V2 adapter does not use the V1 persisted disk-cache format or V1 XDG auth-store fallback. V2 caching is disabled by default. When `modelsDiscovery.cache.enabled` is `true`, V2 stores the raw model-list response and enrichment results through the host-provided `ctx.storage` API. `ttlSeconds` defaults to `86400` seconds (24 hours). The `models_discovery_status` tool accepts `rawCache: true` to include cached raw models and enrichments in its report. The V2 adapter also provides the native TUI commands `/models-discovery-refresh` and `/models-discovery-console`, plus the `models_discovery_refresh` and `models_discovery_status` agent tools. `/models-discovery-console` opens a unified console for browsing Providers → models → structured model metadata and for inspecting or clearing caches. Use `/models-discovery-console status --provider hyy` to filter the browser to one Provider. After rebuilding a local plugin, restart the OpenCode v2 background service with `opencode service restart`.
+The V2 adapter does not use the V1 persisted disk-cache format or V1 XDG auth-store fallback. V2 caching is disabled by default. When `modelsDiscovery.cache.enabled` is `true`, V2 stores the raw model-list response and enrichment results through the host-provided `ctx.storage` API. `ttlSeconds` defaults to `86400` seconds (24 hours). The `models_discovery_status` tool accepts `rawCache: true` to include cached raw models and enrichments in its report. The V2 adapter also provides the native TUI commands `/models-discovery-refresh` and `/models-discovery-console`, plus the `models_discovery_refresh` and `models_discovery_status` agent tools. `/models-discovery-console` opens a unified console for browsing Providers → models → structured model metadata and for inspecting or clearing caches. Use `/models-discovery-console status --provider hyy` to filter the browser to one Provider. Per-model overrides use the `overrides:<providerID>:<modelID>` storage namespace and are independent from discovery cache clearing. After rebuilding a local plugin, restart the OpenCode v2 background service with `opencode service restart`.
 
 ## OpenCode v1 configuration
 
 The remainder of this guide documents the OpenCode v1 adapter. Use `provider.<name>.options.modelsDiscovery` for provider-specific behavior. This is the supported provider-level configuration boundary for OpenCode v1.
 
 OpenCode's own provider config still controls provider identity, npm package, `baseURL`, credentials, and provider availability. This plugin controls model discovery for providers that OpenCode has made available.
+
+V1 is the legacy compatibility path. Its existing configuration, XDG cache,
+auth fallback, and helper commands remain supported, but new V2 lifecycle,
+storage, RPC, TUI, and override capabilities are not backported by default.
 
 ## Provider-Level Configuration (OpenCode v1)
 
