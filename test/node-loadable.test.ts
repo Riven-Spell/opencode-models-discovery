@@ -200,5 +200,29 @@ describe('Node host compatibility (OpenCode Desktop)', () => {
       { exitCode: tuiExitCode, stdout: tuiStdout.trim(), stderr: tuiStderr.slice(0, 800) },
       'plain Node must resolve package/tui export and import cleanly'
     ).toEqual({ exitCode: 0, stdout: 'TUI_IMPORT_OK', stderr: '' })
+
+    const serverProbeFile = path.join(stagedRoot, 'desktop-server-probe.mjs')
+    writeFileSync(
+      serverProbeFile,
+      `const m = await import(${JSON.stringify(`${pkg.name}/server`)});\n` +
+        `const fn = m.default ?? m.ModelDiscoveryPlugin;\n` +
+        `if (!fn || typeof fn !== 'object' || typeof fn.setup !== 'function' || typeof fn.server !== 'function') { console.error('NO_SERVER_EXPORT'); process.exit(2); }\n` +
+        `console.log('SERVER_IMPORT_OK');\n`
+    )
+    let serverStdout = ''
+    let serverStderr = ''
+    let serverExitCode = 0
+    try {
+      serverStdout = execFileSync(node, [serverProbeFile], { cwd: stagedRoot, stdio: 'pipe', encoding: 'utf-8' })
+    } catch (error) {
+      const e = error as { status?: number; stdout?: string; stderr?: string }
+      serverExitCode = e.status ?? 1
+      serverStdout = e.stdout ?? ''
+      serverStderr = e.stderr ?? ''
+    }
+    expect(
+      { exitCode: serverExitCode, stdout: serverStdout.trim(), stderr: serverStderr.slice(0, 800) },
+      'plain Node must resolve package/server export and expose both host adapters'
+    ).toEqual({ exitCode: 0, stdout: 'SERVER_IMPORT_OK', stderr: '' })
   }, 30_000)
 })

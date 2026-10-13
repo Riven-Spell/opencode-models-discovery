@@ -4,10 +4,9 @@
  * Automated Release Script
  *
  * Usage:
- *   bun scripts/release.ts prepare patch   # Open a release PR for 0.1.0 -> 0.1.1
- *   bun scripts/release.ts prepare minor   # Open a release PR for 0.1.0 -> 0.2.0
- *   bun scripts/release.ts prepare major   # Open a release PR for 0.1.0 -> 1.0.0
- *   bun scripts/release.ts prepare 0.2.0   # Open a release PR for a specific version
+ *   bun scripts/release.ts prepare patch       # Open a release PR for 0.1.0 -> 0.1.1
+ *   bun scripts/release.ts prepare 2.0.0-rc.1  # Open an RC release PR
+ *   bun scripts/release.ts prepare 2.0.0       # Open a stable release PR
  *   bun scripts/release.ts publish         # Tag and publish the current package version
  */
 
@@ -45,11 +44,12 @@ function getPackageInfo(): { name: string; repositorySlug: string } {
 }
 
 function bumpVersion(currentVersion: string, type: VersionType | string): string {
-  if (!VERSION_TYPES.includes(type as VersionType) && !/^\d+\.\d+\.\d+$/.test(type)) {
-    throw new Error(`Invalid version type: ${type}. Use 'patch', 'minor', 'major', or a specific version like '0.2.0'`)
+  const explicitVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+  if (!VERSION_TYPES.includes(type as VersionType) && !explicitVersionPattern.test(type)) {
+    throw new Error(`Invalid version type: ${type}. Use 'patch', 'minor', 'major', or a version like '2.0.0-rc.1'`)
   }
 
-  if (/^\d+\.\d+\.\d+$/.test(type)) {
+  if (explicitVersionPattern.test(type)) {
     return type
   }
 
@@ -252,6 +252,8 @@ function publishCurrentVersion(): void {
   const newVersion = getCurrentVersion()
 
   const tagName = `v${newVersion}`
+  const isPrerelease = newVersion.includes('-')
+  const npmTag = isPrerelease ? 'rc' : 'latest'
 
   console.log(`\n🚀 Publishing release ${tagName}`)
 
@@ -271,7 +273,9 @@ function publishCurrentVersion(): void {
   console.log('\n📝 Creating GitHub release...')
 
   try {
-    execFileSync('gh', ['release', 'create', tagName, '--title', `v${newVersion}`, '--notes-file', notesFile], { stdio: 'inherit' })
+    const releaseArgs = ['release', 'create', tagName, '--title', `v${newVersion}`, '--notes-file', notesFile]
+    if (isPrerelease) releaseArgs.push('--prerelease')
+    execFileSync('gh', releaseArgs, { stdio: 'inherit' })
     console.log(`✓ GitHub release created: https://github.com/${repositorySlug}/releases/tag/${tagName}`)
   } catch (error) {
     console.warn('⚠️  GitHub release creation failed (may already exist)')
@@ -289,13 +293,13 @@ function publishCurrentVersion(): void {
   }
 
   try {
-    runCommand('npm', ['publish'], 'Publishing to npm')
+    runCommand('npm', ['publish', '--tag', npmTag], `Publishing to npm dist-tag ${npmTag}`)
     console.log(`\n✅ Successfully published ${name}@${newVersion} to npm!`)
     console.log(`   https://www.npmjs.com/package/${name}`)
   } catch (error) {
     console.error('\n⚠️  npm publish failed. Common reasons:')
     console.error('   1. Trusted Publishing is not configured for this repository')
-    console.error('   2. Package name already exists (version conflict)')
+    console.error('   2. Package name or version already exists (version conflict)')
     console.error('   3. The GitHub Actions workflow is missing id-token: write')
     console.error('   4. The publish step is not running in GitHub Actions')
     console.error('\n   Tag and GitHub release may already exist. After fixing npm permissions, rerun this workflow to retry npm publish.')
@@ -314,7 +318,7 @@ async function main() {
 
   if (command === 'prepare') {
     if (!versionType) {
-      console.error('Usage: bun scripts/release.ts prepare [patch|minor|major|0.x.x]')
+      console.error('Usage: bun scripts/release.ts prepare [patch|minor|major|x.y.z[-prerelease]]')
       process.exit(1)
     }
     prepareRelease(versionType)
@@ -326,7 +330,7 @@ async function main() {
     return
   }
 
-  console.error('Usage: bun scripts/release.ts prepare [patch|minor|major|0.x.x] | publish')
+  console.error('Usage: bun scripts/release.ts prepare [patch|minor|major|x.y.z[-prerelease]] | publish')
   process.exit(1)
 }
 
