@@ -248,4 +248,148 @@ describe("V2 plugin entrypoint", () => {
       fetcher.mockRestore()
     }
   })
+
+  it("uses the newly active integration credential after a credential event", async () => {
+    let activeKey = "first-key"
+    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: "credential-model" }] }),
+    } as Response)
+    const events = {
+      subscribe: vi.fn().mockReturnValue((async function* () {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        activeKey = "second-key"
+        yield { type: "credential.switched" }
+      })()),
+    }
+    const ctx = context({
+      event: events,
+      integration: {
+        transform: vi.fn().mockImplementation(async (callback) => callback({ update: vi.fn(), method: { update: vi.fn() } })),
+        reload: vi.fn().mockResolvedValue(undefined),
+        connection: {
+          active: vi.fn().mockResolvedValue({ type: "credential", id: "active-credential" }),
+          resolve: vi.fn().mockImplementation(async () => ({ type: "key", key: activeKey })),
+        },
+      },
+    })
+
+    try {
+      await plugin.setup(ctx as never)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      const authorizationHeaders = fetcher.mock.calls.map(([, init]) => {
+        const headers = (init as RequestInit | undefined)?.headers
+        return headers instanceof Headers ? headers.get("authorization") : (headers as Record<string, string> | undefined)?.authorization
+      })
+      expect(authorizationHeaders).toContain("Bearer first-key")
+      expect(authorizationHeaders).toContain("Bearer second-key")
+    } finally {
+      fetcher.mockRestore()
+    }
+  })
+
+  it("preserves the last known inventory when a provider request fails", async () => {
+    const fetcher = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: "stable-model" }] }) } as Response)
+      .mockResolvedValueOnce({ ok: false } as Response)
+    const rpcHandlers: Record<string, (...args: unknown[]) => Promise<unknown>> = {}
+    const ctx = context({
+      rpc: {
+        register: vi.fn().mockImplementation(async (definition, handlers) => {
+          if (definition.id === "opencode.models-discovery") Object.assign(rpcHandlers, handlers)
+        }),
+      },
+    })
+
+    try {
+      await plugin.setup(ctx as never)
+      const status = rpcHandlers.status as (input?: unknown) => Promise<{ providers: Array<{ models: Array<{ id: string }> }> }>
+      const before = await status({ details: true })
+      expect(before.providers[0]?.models.map((model) => model.id)).toContain("stable-model")
+
+      const refresh = rpcHandlers.refresh as (input?: unknown) => Promise<unknown>
+      await refresh({ force: true })
+      const after = await status({ details: true })
+      expect(after.providers[0]?.models.map((model) => model.id)).toContain("stable-model")
+    } finally {
+      fetcher.mockRestore()
+    }
+  })
+
+  it("keeps discovered defaults separate from overridden values after a failed refresh", async () => {
+    const fetcher = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ id: "stable-model" }] }) } as Response)
+      .mockResolvedValueOnce({ ok: false } as Response)
+    const storageStore = new Map<string, unknown>()
+    const rpcHandlers: Record<string, (...args: unknown[]) => Promise<unknown>> = {}
+    const ctx = context({
+      storage: {
+        get: vi.fn().mockImplementation(async (key: string) => storageStore.get(key)),
+        set: vi.fn().mockImplementation(async (key: string, value: unknown) => { storageStore.set(key, value) }),
+        remove: vi.fn().mockImplementation(async (key: string) => { storageStore.delete(key) }),
+        scan: vi.fn().mockImplementation(async ({ prefix }: { prefix: string }) => ({
+          entries: [...storageStore.entries()].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => ({ key, value })),
+        })),
+      },
+      rpc: {
+        register: vi.fn().mockImplementation(async (definition, handlers) => {
+          if (definition.id === "opencode.models-discovery") Object.assign(rpcHandlers, handlers)
+        }),
+      },
+    })
+
+    try {
+      await plugin.setup(ctx as never)
+      const set = rpcHandlers.overrideSet as (input: unknown) => Promise<unknown>
+      const refresh = rpcHandlers.refresh as (input?: unknown) => Promise<unknown>
+      const status = rpcHandlers.status as (input?: unknown) => Promise<{
+        providers: Array<{ models: Array<{ name: string; defaultValues?: { name: string } }> }>
+      }>
+
+      await set({ providerID: "local", modelID: "stable-model", patch: { name: "Custom name" } })
+      await refresh({ force: true })
+      const model = (await status({ details: true })).providers[0]?.models[0]
+      expect(model?.name).toBe("Custom name")
+      expect(model?.defaultValues?.name).toBe("stable-model")
+    } finally {
+      fetcher.mockRestore()
+    }
+  })
+
+  it("removes a provider inventory when that provider is removed from configuration", async () => {
+    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ id: "model-before-removal" }] }),
+    } as Response)
+    let configured = true
+    const rpcHandlers: Record<string, (...args: unknown[]) => Promise<unknown>> = {}
+    const ctx = context({
+      provider: {
+        transform: vi.fn().mockImplementation(async (callback) => callback({ get: vi.fn().mockReturnValue(undefined), add: vi.fn(), update: vi.fn(), models: { set: vi.fn() } })),
+        reload: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockImplementation(async () => ({ data: configured ? [{
+          id: "local",
+          name: "Local",
+          package: "@opencode-ai/ai/providers/openai-compatible",
+          settings: { baseURL: "http://127.0.0.1:1234/v1", modelsDiscovery: { enabled: true } },
+        }] : [] })),
+      },
+      rpc: {
+        register: vi.fn().mockImplementation(async (definition, handlers) => {
+          if (definition.id === "opencode.models-discovery") Object.assign(rpcHandlers, handlers)
+        }),
+      },
+    })
+
+    try {
+      await plugin.setup(ctx as never)
+      const refresh = rpcHandlers.refresh as (input?: unknown) => Promise<unknown>
+      const status = rpcHandlers.status as (input?: unknown) => Promise<{ providers: Array<{ id: string }> }>
+      configured = false
+      await refresh({ force: true })
+      expect((await status({ details: true })).providers).toEqual([])
+    } finally {
+      fetcher.mockRestore()
+    }
+  })
 })

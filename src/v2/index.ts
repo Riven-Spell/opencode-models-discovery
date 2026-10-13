@@ -131,14 +131,29 @@ export async function setupV2(ctx: Plugin.Context): Promise<() => void> {
   const refreshInventoryInternal = async (force?: boolean): Promise<RefreshResult> => {
     const resolved = await resolveProviderCredentials(ctx, providers)
     providers.splice(0, providers.length, ...resolved)
-    const inventory = await discoverInventory(
+    const discoveredInventory = await discoverInventory(
       resolved,
       discovery,
       fetch,
       ctx.storage ? createV2StorageCache(ctx.storage) : undefined,
       { force }
     )
-    baselineInventory = new Map([...inventory].map(([providerID, models]) => [providerID, new Map(models)]))
+    const previousInventory = controller.getInventory()
+    const inventory: Inventory = new Map()
+    for (const provider of resolved) {
+      const discovered = discoveredInventory.get(provider.id)
+      if (discovered) {
+        inventory.set(provider.id, discovered)
+        baselineInventory.set(provider.id, new Map(discovered))
+      } else {
+        // A failed request is represented by a missing provider entry. Keep the
+        // last known inventory so a transient outage does not erase models.
+        inventory.set(provider.id, previousInventory.get(provider.id) ?? new Map())
+      }
+    }
+    for (const providerID of [...baselineInventory.keys()]) {
+      if (!resolved.some((provider) => provider.id === providerID)) baselineInventory.delete(providerID)
+    }
     const storedOverrides = await listModelOverrides(ctx.storage)
     const overrideByModel = new Map(storedOverrides.map((override) => [`${override.providerID}:${override.modelID}`, override]))
     for (const [providerID, models] of inventory) {
