@@ -19,6 +19,10 @@ export const ModelDiscoveryPlugin: Plugin = async (input: PluginInput, options?:
   }
 
   logger.info('Model discovery plugin initialized')
+  logger.info('Running through the OpenCode v1 legacy adapter; OpenCode v2 is the primary supported integration.', {
+    adapter: 'v1-legacy',
+    supportPolicy: 'legacy',
+  })
 
   const pluginConfig: PluginConfig = parsePluginConfig(options || {})
 
