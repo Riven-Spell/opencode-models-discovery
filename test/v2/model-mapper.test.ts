@@ -58,7 +58,7 @@ describe("V2 model-mapper", () => {
     const enricher = createModelEnricher(ModelInfoFormat.VLLM, null)
     const mapped = mapToDiscoveredV2Model(discover({ id: "qwen-2.5-72b", max_model_len: 32_768 }, true, enricher), options)
     expect(mapped.limit.context).toBe(32_768)
-    expect(mapped.limit.output).toBe(32_768)
+    expect(mapped.limit.output).toBe(32_000)
   })
 
   it("enriches limits and modalities from litellm model info endpoint", () => {

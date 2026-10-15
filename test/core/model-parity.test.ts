@@ -138,7 +138,7 @@ describe('V1/V2 shared-core parity', () => {
     const draft = drafts[0]!
     const mapped = mapToDiscoveredV2Model(draft, options)
 
-    expect(draft.limit).toEqual({ context: 32_768, output: 32_768 })
+    expect(draft.limit).toEqual({ context: 32_768, output: 32_000 })
     expect(mapped.limit).toEqual(draft.limit)
   })
 

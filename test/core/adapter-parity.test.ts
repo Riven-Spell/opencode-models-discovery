@@ -116,11 +116,11 @@ describe('end-to-end V1 and V2 adapter projection parity', () => {
     // smartModelName: false preserves exact raw ID as name
     expect(v1.name).toBe('qwen/qwen-2.5-72b-instruct')
     expect(v2.name).toBe('qwen/qwen-2.5-72b-instruct')
-    // vLLM max_model_len sets context and bounded output
+    // vLLM max_model_len sets context and output bounded by the default token limit
     expect(v1.limit?.context).toBe(32768)
-    expect(v1.limit?.output).toBe(32768)
+    expect(v1.limit?.output).toBe(32000)
     expect(v2.limit.context).toBe(32768)
-    expect(v2.limit.output).toBe(32768)
+    expect(v2.limit.output).toBe(32000)
   })
 
   it('guarantees identical modalities, reasoning, and tools for fully-enriched models', () => {

@@ -17,6 +17,21 @@ describe('vLLM model info enricher', () => {
     })
   })
 
+  it('bounds output to the default token limit for large max_model_len', () => {
+    const rawModel = {
+      id: 'test-model',
+      object: 'model',
+      created: 1,
+      owned_by: 'vllm',
+      max_model_len: 250000,
+    }
+
+    expect(createVLLMEnricher(null).enrich(rawModel, { filterNonChat: true }).limit).toEqual({
+      context: 250000,
+      output: 32000,
+    })
+  })
+
   it('does not set limit when max_model_len is missing', () => {
     expect(createVLLMEnricher(null).enrich({ id: 'test-model', object: 'model', created: 1, owned_by: 'llama.cpp' }, { filterNonChat: true }).limit).toBeUndefined()
   })
